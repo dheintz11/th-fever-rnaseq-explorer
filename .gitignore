@@ -1,0 +1,19 @@
+# Python / env
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Large raw inputs (regenerable — not needed at runtime)
+data/GSE243323_RAW.tar
+data/GSE243323_series_matrix.txt
+data/quants/
+data/kgml/
+data/gene_set_cache/
+
+# Editor
+.vscode/
+.idea/
