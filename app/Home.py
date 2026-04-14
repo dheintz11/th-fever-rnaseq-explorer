@@ -128,27 +128,73 @@ with tab_gene:
 # body (e.g., when the user's filter returns no gene sets) cannot prevent
 # the pathway tab from rendering. UI tab order is fixed by st.tabs(...) above.
 with tab_path:
+    st.markdown(
+        "Each KEGG pathway is overlaid with expression data. "
+        "**One contrast (comparison) is shown at a time** — pick below."
+    )
+
     pidx = load_pathway_index().sort_values("name")
-    pc1, pc2, pc3 = st.columns([2, 2, 2])
+    de = load_de()
+
+    # Build a mapping: contrast_id -> (numerator, denominator, plain-english)
+    contrast_meta = (de[["contrast", "numerator", "denominator"]]
+                     .drop_duplicates("contrast")
+                     .set_index("contrast"))
+
+    def describe(contrast_id: str) -> str:
+        """Plain-English description of what a contrast actually compares."""
+        num = contrast_meta.loc[contrast_id, "numerator"]
+        den = contrast_meta.loc[contrast_id, "denominator"]
+        if contrast_id.startswith("fever_"):
+            subset = contrast_id.removeprefix("fever_")
+            return (f"**Heat response within {subset}**: "
+                    f"{subset} at 39°C vs {subset} at 37°C. "
+                    f"Red = gene upregulated at 39°C. Blue = downregulated. "
+                    f"Other subsets are *not* part of this comparison.")
+        elif contrast_id.startswith("lineage_"):
+            subset = contrast_id.removeprefix("lineage_").removesuffix("_vs_Naive")
+            return (f"**Lineage identity at baseline**: {subset} at 37°C vs Naive at 37°C. "
+                    f"Red = gene higher in {subset}. Blue = higher in Naive. "
+                    f"Temperature is fixed at 37°C in both groups.")
+        return f"log2FC of {num} vs {den}."
+
+    # Short label for the dropdown itself, more informative than `fever_Th0`.
+    def short_label(contrast_id: str) -> str:
+        if contrast_id.startswith("fever_"):
+            subset = contrast_id.removeprefix("fever_")
+            return f"{contrast_id}  —  {subset}: 39°C vs 37°C"
+        elif contrast_id.startswith("lineage_"):
+            subset = contrast_id.removeprefix("lineage_").removesuffix("_vs_Naive")
+            return f"{contrast_id}  —  {subset} vs Naive at 37°C"
+        return contrast_id
+
+    pc1, pc2, pc3 = st.columns([2, 3, 2])
     with pc1:
         path_labels = [f"{r['pathway_id']} — {r['name']}" for _, r in pidx.iterrows()]
         picked = st.selectbox("KEGG pathway", options=path_labels, index=0)
         picked_id = picked.split(" — ")[0]
     with pc2:
-        contrast_options = sorted(load_de()["contrast"].unique().tolist())
-        # Pull fever_* to the top
+        contrast_options = sorted(de["contrast"].unique().tolist())
+        # fever_* first, then lineage_*
         contrast_options = sorted(contrast_options, key=lambda c: (not c.startswith("fever_"), c))
-        chosen_contrast = st.selectbox(
-            "Colour nodes by log2FC in contrast",
-            options=contrast_options,
+        label_to_id = {short_label(c): c for c in contrast_options}
+        chosen_label = st.selectbox(
+            "Comparison to display",
+            options=list(label_to_id.keys()),
             index=0,
+            help="Each option compares two conditions. Only the two conditions "
+                 "named in the selected comparison drive the colours — the other "
+                 "subsets and temperatures don't appear in this contrast.",
         )
+        chosen_contrast = label_to_id[chosen_label]
     with pc3:
         use_shrunken = st.checkbox("apeglm-shrunken log2FC", value=True,
                                    help="Recommended. Unchecking uses raw Wald log2FC.")
 
+    # Dynamic plain-English description of the selected contrast.
+    st.info(describe(chosen_contrast))
+
     # Build the per-gene value series for the chosen contrast.
-    de = load_de()
     col = "log2fc_shrunk" if use_shrunken else "log2fc"
     gene_value = (de[de["contrast"] == chosen_contrast]
                     .set_index("ensembl_id")[col])
