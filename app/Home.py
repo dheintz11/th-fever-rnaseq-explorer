@@ -123,6 +123,83 @@ with tab_gene:
                     },
                 )
 
+# ---------------- tab 3: KEGG pathway diagram ---------------------------------
+# Rendered before tab 2 in code order so that any st.stop() inside tab 2's
+# body (e.g., when the user's filter returns no gene sets) cannot prevent
+# the pathway tab from rendering. UI tab order is fixed by st.tabs(...) above.
+with tab_path:
+    pidx = load_pathway_index().sort_values("name")
+    pc1, pc2, pc3 = st.columns([2, 2, 2])
+    with pc1:
+        path_labels = [f"{r['pathway_id']} — {r['name']}" for _, r in pidx.iterrows()]
+        picked = st.selectbox("KEGG pathway", options=path_labels, index=0)
+        picked_id = picked.split(" — ")[0]
+    with pc2:
+        contrast_options = sorted(load_de()["contrast"].unique().tolist())
+        # Pull fever_* to the top
+        contrast_options = sorted(contrast_options, key=lambda c: (not c.startswith("fever_"), c))
+        chosen_contrast = st.selectbox(
+            "Colour nodes by log2FC in contrast",
+            options=contrast_options,
+            index=0,
+        )
+    with pc3:
+        use_shrunken = st.checkbox("apeglm-shrunken log2FC", value=True,
+                                   help="Recommended. Unchecking uses raw Wald log2FC.")
+
+    # Build the per-gene value series for the chosen contrast.
+    de = load_de()
+    col = "log2fc_shrunk" if use_shrunken else "log2fc"
+    gene_value = (de[de["contrast"] == chosen_contrast]
+                    .set_index("ensembl_id")[col])
+
+    # Color-range slider so modest effects aren't washed out by a single outlier.
+    range_col1, range_col2 = st.columns([2, 3])
+    with range_col1:
+        color_cap = st.slider(
+            "Color range (±log2FC)", min_value=0.5, max_value=5.0, value=2.0, step=0.25,
+            help="Tighter range makes small effects more visible; wider range keeps "
+                 "extreme genes distinguishable.",
+        )
+
+    fig = render_pathway(
+        picked_id, gene_value,
+        value_label=f"log2FC ({chosen_contrast})",
+        value_range=(-color_cap, color_cap),
+        diverging=True,
+    )
+    # width="content" lets the figure render at its native pixel dimensions
+    # (KEGG's own pathway image resolution) rather than stretching to column.
+    st.plotly_chart(fig, width="content")
+
+    # Diagnostic summary for this pathway × contrast
+    nodes = load_pathway_nodes()
+    pn = nodes[(nodes["pathway_id"] == picked_id) & (nodes["kind"] == "gene")].copy()
+    pn["value"] = pn["ensembl_id"].map(gene_value)
+    n_gene = len(pn)
+    n_mapped = pn["ensembl_id"].notna().sum()
+    n_values = pn["value"].notna().sum()
+    sig = de[(de["contrast"] == chosen_contrast) & (de["padj"] < 0.05)
+             & (de["ensembl_id"].isin(pn["ensembl_id"].dropna()))]
+    st.markdown(
+        f"**Pathway coverage:** {n_gene} gene nodes in KGML · "
+        f"{n_mapped} mapped to Ensembl · {n_values} with expression data · "
+        f"**{len(sig)} significant** (padj<0.05) in this contrast."
+    )
+
+    # Legend
+    with st.expander("Legend", expanded=False):
+        st.markdown(
+            "- **Base image** — KEGG's own rendered pathway (arrows, labels, compounds are all KEGG's work).\n"
+            "- **Red overlay** — gene up-regulated at numerator vs denominator.\n"
+            "- **Blue overlay** — gene down-regulated.\n"
+            "- **Overlay intensity** scales with |log2FC| — small changes barely tint the box.\n"
+            "- **Dashed outline only** — gene present in pathway but no expression data "
+            "(unmapped Ensembl ID or filtered by the low-count cutoff).\n"
+            "- Hover any gene box for symbol, value, and entry ID.\n"
+            "- Zoom and pan with Plotly controls (top-right)."
+        )
+
 # ---------------- tab 2: gene set / module ------------------------------------
 with tab_set:
     idx = load_gene_sets_index()
@@ -317,80 +394,6 @@ with tab_set:
             data=csv,
             file_name=f"{src}_{set_name.replace(' ','_')}_DE.csv",
             mime="text/csv",
-        )
-
-# ---------------- tab 3: KEGG pathway diagram ---------------------------------
-with tab_path:
-    pidx = load_pathway_index().sort_values("name")
-    pc1, pc2, pc3 = st.columns([2, 2, 2])
-    with pc1:
-        path_labels = [f"{r['pathway_id']} — {r['name']}" for _, r in pidx.iterrows()]
-        picked = st.selectbox("KEGG pathway", options=path_labels, index=0)
-        picked_id = picked.split(" — ")[0]
-    with pc2:
-        contrast_options = sorted(load_de()["contrast"].unique().tolist())
-        # Pull fever_* to the top
-        contrast_options = sorted(contrast_options, key=lambda c: (not c.startswith("fever_"), c))
-        chosen_contrast = st.selectbox(
-            "Colour nodes by log2FC in contrast",
-            options=contrast_options,
-            index=0,
-        )
-    with pc3:
-        use_shrunken = st.checkbox("apeglm-shrunken log2FC", value=True,
-                                   help="Recommended. Unchecking uses raw Wald log2FC.")
-
-    # Build the per-gene value series for the chosen contrast.
-    de = load_de()
-    col = "log2fc_shrunk" if use_shrunken else "log2fc"
-    gene_value = (de[de["contrast"] == chosen_contrast]
-                    .set_index("ensembl_id")[col])
-
-    # Color-range slider so modest effects aren't washed out by a single outlier.
-    range_col1, range_col2 = st.columns([2, 3])
-    with range_col1:
-        color_cap = st.slider(
-            "Color range (±log2FC)", min_value=0.5, max_value=5.0, value=2.0, step=0.25,
-            help="Tighter range makes small effects more visible; wider range keeps "
-                 "extreme genes distinguishable.",
-        )
-
-    fig = render_pathway(
-        picked_id, gene_value,
-        value_label=f"log2FC ({chosen_contrast})",
-        value_range=(-color_cap, color_cap),
-        diverging=True,
-    )
-    # width="content" lets the figure render at its native pixel dimensions
-    # (KEGG's own pathway image resolution) rather than stretching to column.
-    st.plotly_chart(fig, width="content")
-
-    # Diagnostic summary for this pathway × contrast
-    nodes = load_pathway_nodes()
-    pn = nodes[(nodes["pathway_id"] == picked_id) & (nodes["kind"] == "gene")].copy()
-    pn["value"] = pn["ensembl_id"].map(gene_value)
-    n_gene = len(pn)
-    n_mapped = pn["ensembl_id"].notna().sum()
-    n_values = pn["value"].notna().sum()
-    sig = de[(de["contrast"] == chosen_contrast) & (de["padj"] < 0.05)
-             & (de["ensembl_id"].isin(pn["ensembl_id"].dropna()))]
-    st.markdown(
-        f"**Pathway coverage:** {n_gene} gene nodes in KGML · "
-        f"{n_mapped} mapped to Ensembl · {n_values} with expression data · "
-        f"**{len(sig)} significant** (padj<0.05) in this contrast."
-    )
-
-    # Legend
-    with st.expander("Legend", expanded=False):
-        st.markdown(
-            "- **Base image** — KEGG's own rendered pathway (arrows, labels, compounds are all KEGG's work).\n"
-            "- **Red overlay** — gene up-regulated at numerator vs denominator.\n"
-            "- **Blue overlay** — gene down-regulated.\n"
-            "- **Overlay intensity** scales with |log2FC| — small changes barely tint the box.\n"
-            "- **Dashed outline only** — gene present in pathway but no expression data "
-            "(unmapped Ensembl ID or filtered by the low-count cutoff).\n"
-            "- Hover any gene box for symbol, value, and entry ID.\n"
-            "- Zoom and pan with Plotly controls (top-right)."
         )
 
 # ---------------- footer ------------------------------------------------------
