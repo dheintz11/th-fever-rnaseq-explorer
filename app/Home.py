@@ -266,19 +266,34 @@ with tab_set:
             "differentiated subset for lineage_*)."
         )
 
-    # Module activity score: per-sample mean of z-scored VST across module genes
+    # Module activity score: per-sample mean of z-scored VST across module genes.
+    # Use VST index (post low-count filter) regardless of the user-selected scale —
+    # `present` may include TPM-only genes that got filtered out of DESeq2.
     from lib.data import load_vst
-    vst_mat = load_vst().loc[present]
-    row_means = vst_mat.mean(axis=1)
-    row_sds = vst_mat.std(axis=1).replace(0, 1.0)
-    z_mat = vst_mat.sub(row_means, axis=0).div(row_sds, axis=0)
-    module_scores = z_mat.mean(axis=0)  # sample_id -> score
-
+    vst_df = load_vst()
+    present_vst = [e for e in present if e in vst_df.index]
     with module_cols[1]:
-        st.plotly_chart(
-            module_activity_boxplot(module_scores, meta, set_name=set_name),
-            width="stretch",
-        )
+        if not present_vst:
+            st.info(
+                "Module activity score is unavailable: no genes in this set "
+                "passed the low-count filter used for DE analysis."
+            )
+        else:
+            vst_mat = vst_df.loc[present_vst]
+            row_means = vst_mat.mean(axis=1)
+            row_sds = vst_mat.std(axis=1).replace(0, 1.0)
+            z_mat = vst_mat.sub(row_means, axis=0).div(row_sds, axis=0)
+            module_scores = z_mat.mean(axis=0)  # sample_id -> score
+            st.plotly_chart(
+                module_activity_boxplot(module_scores, meta, set_name=set_name),
+                width="stretch",
+            )
+            if len(present_vst) < len(present):
+                dropped = len(present) - len(present_vst)
+                st.caption(
+                    f"Score based on {len(present_vst)} of {len(present)} set genes "
+                    f"({dropped} dropped by low-count filter)."
+                )
 
     # DE table for the set
     with st.expander("DE stats for all genes in this set (all contrasts)", expanded=False):
