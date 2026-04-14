@@ -203,9 +203,11 @@ with tab_path:
     range_col1, range_col2 = st.columns([2, 3])
     with range_col1:
         color_cap = st.slider(
-            "Color range (±log2FC)", min_value=0.5, max_value=5.0, value=2.0, step=0.25,
+            "Color range (±log2FC)", min_value=0.5, max_value=5.0, value=1.0, step=0.25,
             help="Tighter range makes small effects more visible; wider range keeps "
-                 "extreme genes distinguishable.",
+                 "extreme genes distinguishable. Default ±1.0 works well for most "
+                 "pathways; drop to ±0.5 for subtle modules (OxPhos, glycolysis), "
+                 "raise to ±2–3 for strong responses (HSR, ISG).",
         )
 
     fig = render_pathway(
